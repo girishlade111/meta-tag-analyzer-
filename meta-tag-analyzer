@@ -1,0 +1,367 @@
+import { useState } from 'react'
+import { Button } from "/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "/components/ui/card"
+import { Input } from "/components/ui/input"
+import { Check, X, Copy, Download, Search, Globe, Tag, Image, Link, Bot, Twitter } from "lucide-react"
+
+type AnalysisResult = {
+  url: string
+  title: string | null
+  description: string | null
+  keywords: string | null
+  ogImage: string | null
+  canonicalUrl: string | null
+  robots: string | null
+  twitterCard: string | null
+}
+
+const IMPORTANT_TAGS = ['title', 'description', 'og:image']
+
+export default function MetaTagAnalyzer() {
+  const [url, setUrl] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<AnalysisResult | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const validateUrl = (inputUrl: string): boolean => {
+    try {
+      new URL(inputUrl)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const extractMetaTags = (html: string): AnalysisResult => {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(html, 'text/html')
+    
+    const getMetaContent = (name: string) => {
+      const meta = doc.querySelector(`meta[name="${name}"], meta[property="${name}"]`)
+      return meta ? meta.getAttribute('content') : null
+    }
+
+    return {
+      url,
+      title: doc.querySelector('title')?.textContent || null,
+      description: getMetaContent('description') || getMetaContent('og:description'),
+      keywords: getMetaContent('keywords'),
+      ogImage: getMetaContent('og:image'),
+      canonicalUrl: doc.querySelector('link[rel="canonical"]')?.getAttribute('href') || null,
+      robots: getMetaContent('robots'),
+      twitterCard: getMetaContent('twitter:card')
+    }
+  }
+
+  const analyzeUrl = async () => {
+    if (!validateUrl(url)) {
+      setError('Please enter a valid URL (e.g., https://example.com)')
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+    setResult(null)
+
+    try {
+      // Using a CORS proxy to fetch the HTML content
+      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`
+      const response = await fetch(proxyUrl)
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch the URL')
+      }
+
+      const data = await response.json()
+      
+      if (data.contents) {
+        const result = extractMetaTags(data.contents)
+        setResult(result)
+      } else {
+        throw new Error('No content received from the URL')
+      }
+    } catch (err) {
+      setError('Failed to analyze the URL. Please try again.')
+      console.error('Analysis error:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const copyToClipboard = (text: string | null, field: string) => {
+    if (!text) return
+    navigator.clipboard.writeText(text)
+    setCopied(field)
+    setTimeout(() => setCopied(null), 2000)
+  }
+
+  const exportAsJson = () => {
+    if (!result) return
+    
+    const dataStr = JSON.stringify(result, null, 2)
+    const dataUri = `data:application/json;charset=utf-8,${encodeURIComponent(dataStr)}`
+    const exportName = `meta-tags-${new Date().toISOString().slice(0, 10)}.json`
+    
+    const linkElement = document.createElement('a')
+    linkElement.setAttribute('href', dataUri)
+    linkElement.setAttribute('download', exportName)
+    linkElement.click()
+  }
+
+  const getMissingTags = (): string[] => {
+    if (!result) return []
+    
+    return IMPORTANT_TAGS.filter(tag => {
+      if (tag === 'title') return !result.title
+      if (tag === 'description') return !result.description
+      if (tag === 'og:image') return !result.ogImage
+      return false
+    })
+  }
+
+  const missingTags = getMissingTags()
+
+  const MetaTagCard = ({ 
+    icon, 
+    title, 
+    value, 
+    fieldName,
+    isImportant = false 
+  }: {
+    icon: React.ReactNode
+    title: string
+    value: string | null
+    fieldName: string
+    isImportant?: boolean
+  }) => (
+    <div className={`border rounded-lg p-4 ${isImportant && !value ? 'bg-red-50 border-red-200' : ''}`}>
+      <div className="flex justify-between items-center mb-2">
+        <div className="flex items-center gap-2">
+          {icon}
+          <h3 className="font-medium">{title}</h3>
+        </div>
+        {value ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => copyToClipboard(value, fieldName)}
+          >
+            <Copy className="h-4 w-4 mr-1" />
+            {copied === fieldName ? 'Copied!' : 'Copy'}
+          </Button>
+        ) : (
+          <span className="text-xs text-red-600">Missing</span>
+        )}
+      </div>
+      {value ? (
+        <p className="text-gray-700 break-words">{value}</p>
+      ) : (
+        <p className="text-gray-400 italic">Not found</p>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Meta Tag Analyzer</h1>
+          <p className="text-gray-600">Check and analyze the SEO meta tags of any website</p>
+        </div>
+
+        <div className="bg-white shadow rounded-lg p-6 mb-8">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <Input
+              type="url"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Enter URL (e.g., https://example.com)"
+              className="flex-grow"
+              onKeyDown={(e) => e.key === 'Enter' && analyzeUrl()}
+            />
+            <Button onClick={analyzeUrl} disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Search className="h-4 w-4 mr-2 animate-pulse" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Search className="h-4 w-4 mr-2" />
+                  Analyze
+                </>
+              )}
+            </Button>
+          </div>
+          {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        </div>
+
+        {result && (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <CardTitle>Analysis Results</CardTitle>
+                    <CardDescription className="break-all">URL: {result.url}</CardDescription>
+                  </div>
+                  <Button variant="outline" onClick={exportAsJson}>
+                    <Download className="h-4 w-4 mr-2" />
+                    Export JSON
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {missingTags.length > 0 && (
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+                    <div className="flex">
+                      <div className="flex-shrink-0">
+                        <X className="h-5 w-5 text-yellow-400" />
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-sm font-medium text-yellow-800">
+                          {missingTags.length} important {missingTags.length === 1 ? 'tag is' : 'tags are'} missing
+                        </h3>
+                        <div className="mt-2 text-sm text-yellow-700">
+                          <ul className="list-disc pl-5 space-y-1">
+                            {missingTags.map(tag => (
+                              <li key={tag}>
+                                {tag === 'title' && 'Page title tag'}
+                                {tag === 'description' && 'Meta description'}
+                                {tag === 'og:image' && 'Open Graph image'}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <MetaTagCard
+                    icon={<Globe className="h-5 w-5 text-blue-500" />}
+                    title="Title Tag"
+                    value={result.title}
+                    fieldName="title"
+                    isImportant
+                  />
+
+                  <MetaTagCard
+                    icon={<Tag className="h-5 w-5 text-green-500" />}
+                    title="Meta Description"
+                    value={result.description}
+                    fieldName="description"
+                    isImportant
+                  />
+
+                  <MetaTagCard
+                    icon={<Tag className="h-5 w-5 text-purple-500" />}
+                    title="Keywords"
+                    value={result.keywords}
+                    fieldName="keywords"
+                  />
+
+                  <MetaTagCard
+                    icon={<Image className="h-5 w-5 text-orange-500" />}
+                    title="OG Image"
+                    value={result.ogImage}
+                    fieldName="ogImage"
+                    isImportant
+                  />
+
+                  <MetaTagCard
+                    icon={<Link className="h-5 w-5 text-indigo-500" />}
+                    title="Canonical URL"
+                    value={result.canonicalUrl}
+                    fieldName="canonicalUrl"
+                  />
+
+                  <MetaTagCard
+                    icon={<Bot className="h-5 w-5 text-gray-500" />}
+                    title="Robots Meta Tag"
+                    value={result.robots}
+                    fieldName="robots"
+                  />
+
+                  <MetaTagCard
+                    icon={<Twitter className="h-5 w-5 text-blue-400" />}
+                    title="Twitter Card"
+                    value={result.twitterCard}
+                    fieldName="twitterCard"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {missingTags.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>SEO Recommendations</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-4">
+                    {missingTags.includes('title') && (
+                      <li>
+                        <h4 className="font-medium flex items-center gap-2">
+                          <Globe className="h-5 w-5 text-blue-500" />
+                          Add a Title Tag
+                        </h4>
+                        <p className="text-gray-600 text-sm mt-1">
+                          The title tag is crucial for SEO and appears in search results. It should:
+                        </p>
+                        <ul className="list-disc pl-5 text-gray-600 text-sm mt-1 space-y-1">
+                          <li>Be under 60 characters</li>
+                          <li>Include your primary keyword</li>
+                          <li>Accurately describe the page content</li>
+                          <li>Be unique for each page</li>
+                        </ul>
+                      </li>
+                    )}
+
+                    {missingTags.includes('description') && (
+                      <li>
+                        <h4 className="font-medium flex items-center gap-2">
+                          <Tag className="h-5 w-5 text-green-500" />
+                          Add a Meta Description
+                        </h4>
+                        <p className="text-gray-600 text-sm mt-1">
+                          Meta descriptions appear in search results and should:
+                        </p>
+                        <ul className="list-disc pl-5 text-gray-600 text-sm mt-1 space-y-1">
+                          <li>Be under 160 characters</li>
+                          <li>Include relevant keywords naturally</li>
+                          <li>Provide a compelling summary of the page</li>
+                          <li>Encourage users to click</li>
+                        </ul>
+                      </li>
+                    )}
+
+                    {missingTags.includes('og:image') && (
+                      <li>
+                        <h4 className="font-medium flex items-center gap-2">
+                          <Image className="h-5 w-5 text-orange-500" />
+                          Add an Open Graph Image
+                        </h4>
+                        <p className="text-gray-600 text-sm mt-1">
+                          Open Graph images appear when your page is shared on social media:
+                        </p>
+                        <ul className="list-disc pl-5 text-gray-600 text-sm mt-1 space-y-1">
+                          <li>Use an eye-catching, relevant image</li>
+                          <li>Recommended size: 1200×630 pixels</li>
+                          <li>Use JPG or PNG format</li>
+                          <li>Keep file size under 1MB</li>
+                        </ul>
+                      </li>
+                    )}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
